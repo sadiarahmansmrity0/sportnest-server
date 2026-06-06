@@ -18,7 +18,7 @@ app.use(express.json());
 app.use(cookieParser()); // 👈 Necessary to read cookies from incoming requests
 
 // Singleton MongoDB Connection Utility
-const client = new MongoClient(process.env.MONGODB_URI);
+const client = new MongoClient(process.env.SPORTNEST_DB_URL);
 let db;
 
 async function connectDB() {
@@ -55,7 +55,87 @@ app.get('/api/health', async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
+// ==========================================
+// BOOKING ENDPOINTS
+// ==========================================
 
+// 1. Create a new booking request
+app.post('/api/bookings', async (req, res) => {
+  try {
+    const { facilityId, facilityTitle, userEmail, date, slot } = req.body;
+
+    // Simple validation
+    if (!facilityId || !userEmail || !date || !slot) {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Missing required booking details (facilityId, userEmail, date, slot)." 
+      });
+    }
+
+    const database = await connectDB();
+    const bookingsCollection = database.collection('bookings');
+
+    // Optional: Check if the exact same slot is already booked for that date
+    const existingBooking = await bookingsCollection.findOne({ facilityId, date, slot, status: "confirmed" });
+    if (existingBooking) {
+      return res.status(400).json({
+        success: false,
+        message: "Sorry, this slot has already been taken by someone else!"
+      });
+    }
+
+    const newBooking = {
+      facilityId,
+      facilityTitle, // Storing the title makes it easier to show on the user dashboard
+      userEmail,
+      date,
+      slot,
+      status: 'pending', // Default status when requested
+      createdAt: new Date()
+    };
+
+    const result = await bookingsCollection.insertOne(newBooking);
+    
+    res.status(201).json({
+      success: true,
+      message: "Booking request submitted successfully!",
+      bookingId: result.insertedId
+    });
+
+  } catch (error) {
+    console.error("Booking creation error:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
+
+// 2. Get bookings for a specific user (Dashboard)
+app.get('/api/bookings', async (req, res) => {
+  try {
+    const { email } = req.query; // Pass email as a query parameter: /api/bookings?email=user@example.com
+    
+    if (!email) {
+      return res.status(400).json({ success: false, message: "User email query parameter is required." });
+    }
+
+    const database = await connectDB();
+    const bookingsCollection = database.collection('bookings');
+    
+    // Fetch bookings matching this user's email, sorted by newest first
+    const userBookings = await bookingsCollection
+      .find({ userEmail: email })
+      .sort({ createdAt: -1 })
+      .toArray();
+
+    res.json({
+      success: true,
+      bookings: userBookings
+    });
+
+  } catch (error) {
+    console.error("Fetch bookings error:", error);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  }
+});
 // USER REGISTRATION ENDPOINT
 app.post('/api/auth/register', async (req, res) => {
     try {
@@ -181,6 +261,108 @@ app.get('/api/auth/me', verifyToken, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
+// GET ALL FACILITIES (With optional search and category filter)
+// URL Example: /api/facilities OR /api/facilities?category=Badminton
+app.get('/api/facilities', async (req, res) => {
+    try {
+        const database = await connectDB();
+        const facilitiesCollection = database.collection('facilities');
+        
+        const { category, search } = req.query;
+        let query = {};
+
+        // Filter by sport category if provided
+        if (category) {
+            query.category = category;
+        }
+
+        // Search by title or location keyword if provided (case-insensitive)
+        if (search) {
+            query.$or = [
+                { title: { $regex: search, $options: 'i' } },
+                { location: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        const facilities = await facilitiesCollection.find(query).toArray();
+        res.status(200).json({ success: true, count: facilities.length, data: facilities });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+//  GET SINGLE FACILITY DETAILS BY ID
+// URL Example: /api/facilities/64f1234567890abcdef12345
+// GET SINGLE FACILITY DETAILS BY ID
+app.get('/api/facilities/:id', async (req, res) => {
+    try {
+        const database = await connectDB();
+        const facilitiesCollection = database.collection('facilities');
+        const { id } = req.params;
+
+        // Validate ObjectId format
+        if (!ObjectId.isValid(id)) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Invalid facility ID format.' 
+            });
+        }
+
+        const facility = await facilitiesCollection.findOne({ _id: new ObjectId(id) });
+        
+        if (!facility) {
+            return res.status(404).json({ 
+                success: false, 
+                message: 'Facility arena not found.' 
+            });
+        }
+
+        // ✅ This is the key - make sure you're returning the data property
+        res.status(200).json({ 
+            success: true, 
+            data: facility  // ← Important: facility is inside 'data'
+        });
+    } catch (error) {
+        console.error('Error fetching facility:', error);
+        res.status(500).json({ 
+            success: false, 
+            message: error.message 
+        });
+    }
+});
+
+//  ADMIN ONLY: ADD NEW FACILITY (Protected Route)
+app.post('/api/facilities', verifyToken, async (req, res) => {
+    try {
+        const database = await connectDB();
+        const usersCollection = database.collection('users');
+        const facilitiesCollection = database.collection('facilities');
+
+        // Confirm the logged-in user has admin privileges
+        const actingUser = await usersCollection.findOne({ _id: new ObjectId(req.user.id) });
+        if (!actingUser || actingUser.role !== 'admin') {
+            return res.status(403).json({ success: false, message: 'Forbidden. Admin privileges required.' });
+        }
+
+        const { title, image, pricePerHour, location, category, description, availableSlots } = req.body;
+
+        const newFacility = {
+            title,
+            image,
+            pricePerHour: Number(pricePerHour),
+            location,
+            category, // e.g., "Football", "Badminton", "Cricket"
+            description,
+            availableSlots: availableSlots || ["06:00 AM - 08:00 AM", "04:00 PM - 06:00 PM", "06:00 PM - 08:00 PM"],
+            createdAt: new Date()
+        };
+
+        const result = await facilitiesCollection.insertOne(newFacility);
+        res.status(201).json({ success: true, data: { _id: result.insertedId, ...newFacility } });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
 app.listen(PORT, () => {
     console.log(`🚀 SportNest single-file server running on port ${PORT}`);
 });
