@@ -85,7 +85,16 @@ app.get('/api/facilities', async (req, res) => {
     const facilities = await db.collection('facilities').find(query).toArray();
     res.json({ success: true, data: facilities });
 });
-
+app.delete('/api/facilities/:id', async (req, res) => {
+    try {
+        const db = await getDB();
+        const { id } = req.params;
+        const result = await db.collection('facilities').deleteOne({ _id: new require('mongodb').ObjectId(id) });
+        res.json({ success: true, result });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
 app.delete('/api/bookings/:id', async (req, res) => {
     try {
         const { id } = req.params;
