@@ -80,12 +80,36 @@ app.get('/api/facilities/:id', async (req, res) => {
     }
 });
 app.get('/api/facilities', async (req, res) => {
+    const { ownerEmail } = req.query;
+    const query = ownerEmail ? { ownerEmail } : {}; // If email exists, filter by it
+    const facilities = await db.collection('facilities').find(query).toArray();
+    res.json({ success: true, data: facilities });
+});
+
+app.delete('/api/bookings/:id', async (req, res) => {
     try {
-        const database = await getDB();
-        const facilities = await database.collection('facilities').find({}).toArray();
-        res.json({ success: true, data: facilities });
+        const { id } = req.params;
+        const db = await getDB();
+        const result = await db.collection('bookings').deleteOne({ _id: new ObjectId(id) });
+        
+        if (result.deletedCount === 1) {
+            res.json({ success: true, message: "Booking cancelled" });
+        } else {
+            res.status(404).json({ success: false, message: "Booking not found" });
+        }
     } catch (err) {
-        res.status(500).json({ success: false, message: "Error fetching facilities" });
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+app.post('/api/facilities', async (req, res) => {
+    try {
+        const db = await getDB();
+        const newFacility = req.body;
+        // Ensure ownerEmail is included from the body
+        const result = await db.collection('facilities').insertOne(newFacility);
+        res.json({ success: true, insertedId: result.insertedId });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 
