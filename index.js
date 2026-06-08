@@ -7,7 +7,10 @@ const { MongoClient, ObjectId } = require('mongodb');
 require('dotenv').config();
 
 const app = express();
-app.use(cors({ origin: 'http://localhost:3000', credentials: true }));
+app.use(cors({
+  origin: ['https://your-frontend-url.vercel.app'], // Replace with your actual Vercel URL
+  credentials: true
+}));
 app.use(express.json());
 
 const client = new MongoClient(process.env.SPORTNEST_DB_URL);
