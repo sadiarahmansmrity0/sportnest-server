@@ -19,20 +19,35 @@ async function getDB() {
     return client.db('sportnest');
 }
 // REGISTER ROUTE
+// REGISTER ROUTE (UPDATED & FIXED)
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { email, password } = req.body;
         const db = await getDB();
+        
+        // 1. Check if user already exists
         const existing = await db.collection('users').findOne({ email });
+        if (existing) {
+            return res.status(400).json({ success: false, message: "User exists" });
+        }
         
-        if (existing) return res.status(400).json({ success: false, message: "User exists" });
+        // 2. CRITICAL FIX: Hash the plain-text password before saving it
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
         
-        await db.collection('users').insertOne({ email, password });
-        res.json({ success: true, message: "Registered" });
+        // 3. Save the user document with the encrypted hashed password
+        await db.collection('users').insertOne({ 
+            email, 
+            password: hashedPassword,
+            createdAt: new Date()
+        });
+        
+        res.json({ success: true, message: "Registered successfully" });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
 });
+
 
 // LOGIN ROUTE
 app.post('/api/auth/login', async (req, res) => {
@@ -91,7 +106,25 @@ app.get('/api/bookings', async (req, res) => {
     return res.status(500).json({ success: false, error: error.message });
   }
 });
+// Add this to your index.js
+app.delete('/api/bookings/:id', async (req, res) => {
+    try {
+        const db = await getDB();
+        const { id } = req.params;
 
+        // CRITICAL: Ensure you pass 'new ObjectId(id)' to look up native hex IDs
+        const result = await db.collection('bookings').deleteOne({ _id: new ObjectId(id) });
+
+        if (result.deletedCount === 1) {
+            return res.json({ success: true, message: "Booking cancelled successfully" });
+        } else {
+            return res.status(404).json({ success: false, message: "Booking not found" });
+        }
+    } catch (err) {
+        console.error("Booking delete error:", err);
+        return res.status(500).json({ success: false, message: err.message });
+    }
+});
 
 // Facility GET Route
 app.get('/api/facilities/:id', async (req, res) => {
