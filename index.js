@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const { MongoClient, ObjectId } = require('mongodb');
+
 require('dotenv').config();
 
 const app = express();
@@ -58,16 +59,39 @@ app.post('/api/auth/login', async (req, res) => {
 });
 // Booking GET Route (Public for now)
 // Example of how your routes must look now:
-app.get('/api/bookings', async (req, res) => {
+// Add this route to your index.js, outside of other functions
+app.post('/api/bookings', async (req, res) => {
     try {
-        const { userEmail } = req.query;
-        const db = await getDB(); // Make sure this is getDB()
-        const bookings = await db.collection('bookings').find({ userEmail }).toArray();
-        res.json({ success: true, data: bookings });
+        const db = await getDB();
+        const bookingData = req.body;
+        const result = await db.collection('bookings').insertOne(bookingData);
+        res.json({ success: true, result });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
 });
+app.get('/api/bookings', async (req, res) => {
+  try {
+    // 1. Get userEmail from the incoming URL query parameters
+    const { userEmail } = req.query; 
+
+    if (!userEmail) {
+      return res.status(400).json({ success: false, message: "Email parameter is required" });
+    }
+
+    // 2. Get the database instance using your helper function
+    const db = await getDB();
+
+    // 3. Query native MongoDB using 'userEmail' and convert the cursor to an Array
+    const bookings = await db.collection('bookings').find({ userEmail: userEmail }).toArray(); 
+
+    // 4. Return the array data back to the client
+    return res.status(200).json(bookings); 
+  } catch (error) {
+    return res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 
 // Facility GET Route
 app.get('/api/facilities/:id', async (req, res) => {
@@ -80,32 +104,42 @@ app.get('/api/facilities/:id', async (req, res) => {
     }
 });
 app.get('/api/facilities', async (req, res) => {
-    const { ownerEmail } = req.query;
-    const query = ownerEmail ? { ownerEmail } : {}; // If email exists, filter by it
-    const facilities = await db.collection('facilities').find(query).toArray();
-    res.json({ success: true, data: facilities });
+    try {
+        const db = await getDB(); // <--- THIS IS REQUIRED IN EVERY ROUTE
+        const { ownerEmail } = req.query;
+        const query = ownerEmail ? { ownerEmail } : {}; 
+        const facilities = await db.collection('facilities').find(query).toArray();
+        res.json({ success: true, data: facilities });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
 });
 app.delete('/api/facilities/:id', async (req, res) => {
     try {
         const db = await getDB();
         const { id } = req.params;
-        const result = await db.collection('facilities').deleteOne({ _id: new require('mongodb').ObjectId(id) });
+
+        // CORRECTED: Use 'new' here
+        const result = await db.collection('facilities').deleteOne({ _id: new ObjectId(id) });
+
         res.json({ success: true, result });
     } catch (err) {
+        console.error("Delete error:", err);
         res.status(500).json({ success: false, message: err.message });
     }
 });
-app.delete('/api/bookings/:id', async (req, res) => {
+app.patch('/api/facilities/:id', async (req, res) => {
     try {
+        const db = await getDB(); // <--- THIS IS REQUIRED IN EVERY ROUTE
         const { id } = req.params;
-        const db = await getDB();
-        const result = await db.collection('bookings').deleteOne({ _id: new ObjectId(id) });
+        const updatedData = req.body;
         
-        if (result.deletedCount === 1) {
-            res.json({ success: true, message: "Booking cancelled" });
-        } else {
-            res.status(404).json({ success: false, message: "Booking not found" });
-        }
+        const result = await db.collection('facilities').updateOne(
+            { _id: new ObjectId(id) },
+            { $set: updatedData }
+        );
+        
+        res.json({ success: true, message: "Updated successfully", result });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
     }
