@@ -8,11 +8,14 @@ require('dotenv').config();
 
 const app = express();
 app.use(cors({
-  origin: ['https://your-frontend-url.vercel.app'], // Replace with your actual Vercel URL
+  origin: ['https://sportnest-frontend-phi.vercel.app', 'http://localhost:3000'], 
   credentials: true
 }));
-app.use(express.json());
 
+app.use(express.json());
+app.get('/', (req, res) => {
+    res.json({ success: true, message: "SportNest API Server is live and operational! 🚀" });
+});
 const client = new MongoClient(process.env.SPORTNEST_DB_URL);
 async function getDB() {
     // If the client isn't connected, connect it
